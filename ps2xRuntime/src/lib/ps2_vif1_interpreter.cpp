@@ -58,7 +58,7 @@ namespace
                 payloadBytes = static_cast<uint64_t>(nloop) * nreg * 8ull;
                 payloadBytes = (payloadBytes + 15ull) & ~15ull;
             }
-            else if (flg == kGifFmtImage || flg == 3u) // FLG=3 ("disabled" in the GS manual) behaves exactly like IMAGE: NLOOP qwords of image data.
+            else if (flg == kGifFmtImage)
             {
                 payloadBytes = static_cast<uint64_t>(nloop) * 16ull;
                 const uint64_t availableBytes = sizeBytes - offset;
@@ -113,7 +113,12 @@ void PS2Memory::processVIF0Data(const uint8_t *data, uint32_t sizeBytes)
         vif0_regs.code = cmd;
         vif0_regs.num = num;
         if (irq)
+        {
             vif0_regs.stat |= (1u << 11);
+            // The I bit raises the VIF0 interrupt (INTC 4) unless ERR.MII masks it.
+            if ((vif0_regs.err & 0x1u) == 0u)
+                queueIntcCause(4u);
+        }
 
         if (opcode == VIF_NOP)
         {
@@ -344,7 +349,12 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
         vif1_regs.code = cmd;
         vif1_regs.num = num;
         if (irq)
+        {
             vif1_regs.stat |= (1u << 11); // INT
+            // The I bit raises the VIF1 interrupt (INTC 5) unless ERR.MII masks it.
+            if ((vif1_regs.err & 0x1u) == 0u)
+                queueIntcCause(5u);
+        }
 
         if (opcode == VIF_NOP)
         {

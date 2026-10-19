@@ -90,12 +90,7 @@ namespace
     constexpr uint32_t kGuestHeapDefaultBase = 0x00100000u;
     constexpr uint32_t kGuestHeapDefaultAlignment = 16u;
     constexpr uint32_t kGuestHeapSafetyPad = 0x1000u;
-    // Reserve the top 256 KiB for EE and callback stacks.
-    constexpr uint32_t kGuestHeapHardLimit = PS2_RAM_SIZE - 0x00040000u;
-    // The runtime allocator must not allocate from the heap managed by the game.
-    // These bytes are below the usual ELF load address and above the RPC/TLS pools.
-    constexpr uint32_t kRuntimeGuestHeapBase = 0x000C1000u;
-    constexpr uint32_t kRuntimeGuestHeapLimit = 0x00100000u;
+    constexpr uint32_t kGuestHeapHardLimit = 0x01F00000u;
 
     constexpr uint32_t COP0_CAUSE_EXCCODE_MASK = 0x0000007Cu;
     constexpr uint32_t COP0_CAUSE_BD = 0x80000000u;
@@ -1494,6 +1489,10 @@ void PS2Runtime::drainCompletedDmacHandlers(uint8_t *rdram)
     {
         ps2_syscalls::dispatchDmacHandlersForCause(rdram, this, cause);
     }
+    for (uint32_t cause : m_memory.consumePendingIntcCauses())
+    {
+        ps2_syscalls::dispatchIntcHandlersForCause(rdram, this, cause);
+    }
 }
 
 void PS2Runtime::handleTrap(uint8_t *rdram, R5900Context *ctx)
@@ -1664,8 +1663,10 @@ void PS2Runtime::resetGuestHeapLocked(uint32_t guestBase, uint32_t guestLimit)
     }
 
     m_guestHeapBlocks.clear();
-    m_guestHeapBlocks.push_back({kRuntimeGuestHeapBase,
-                                 kRuntimeGuestHeapLimit - kRuntimeGuestHeapBase, true});
+    if (limit > base)
+    {
+        m_guestHeapBlocks.push_back({base, limit - base, true});
+    }
 
     m_guestHeapBase = base;
     m_guestHeapEnd = base;
