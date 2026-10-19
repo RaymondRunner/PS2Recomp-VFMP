@@ -725,9 +725,8 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
             if ((nloop * nreg) & 1)
                 offset += 8;
         }
-        else if (flg == GIF_FMT_IMAGE || flg == GIF_FMT_DISABLED)
+        else if (flg == GIF_FMT_IMAGE)
         {
-            // FLG=3 ("disabled" in the GS manual) behaves exactly like IMAGE: NLOOP qwords of image data.
             uint32_t imageBytes = nloop * 16;
             if (offset + imageBytes > sizeBytes)
                 imageBytes = sizeBytes - offset;
@@ -1713,10 +1712,11 @@ void GS::updatePreferredDisplaySourceForDraw(const GSPrimitiveBatch &batch)
 
     const GSVertex &v0 = batch.vertices[0];
     const GSVertex &v1 = batch.vertices[1];
-    int x0 = static_cast<int>(v0.x) - (ctx.xyoffset.ofx >> 4);
-    int y0 = static_cast<int>(v0.y) - (ctx.xyoffset.ofy >> 4);
-    int x1 = static_cast<int>(v1.x) - (ctx.xyoffset.ofx >> 4);
-    int y1 = static_cast<int>(v1.y) - (ctx.xyoffset.ofy >> 4);
+    // Same pixel rectangle as GSCpuBackend::DrawSprite.
+    int x0 = gsCeilPixel(gsWindowCoord(v0.x, ctx.xyoffset.ofx));
+    int y0 = gsCeilPixel(gsWindowCoord(v0.y, ctx.xyoffset.ofy));
+    int x1 = gsCeilPixel(gsWindowCoord(v1.x, ctx.xyoffset.ofx));
+    int y1 = gsCeilPixel(gsWindowCoord(v1.y, ctx.xyoffset.ofy));
     if (x0 > x1) std::swap(x0, x1);
     if (y0 > y1) std::swap(y0, y1);
     const int xEnd = x0 + std::max(1, x1 - x0) - 1;

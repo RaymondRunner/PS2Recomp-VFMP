@@ -352,7 +352,7 @@ namespace
 
     void expectGuestHeapReusable(TestCase &t, PS2Runtime &runtime, const char *message)
     {
-        const uint32_t expectedBase = 0x000C1000u; // Runtime-owned packet allocator, not the game's heap.
+        const uint32_t expectedBase = runtime.guestHeapBase();
         const uint32_t probe = runtime.guestMalloc(16u, 16u);
         t.Equals(probe, expectedBase, message);
         runtime.guestFree(probe);
@@ -2170,61 +2170,6 @@ void register_ps2_gs_tests()
             t.IsTrue(same, "GIF IMAGE transfer should write payload bytes into GS VRAM");
         });
 
-        tc.Run("GIF FLG=3 (IMAGE2) packet writes host-to-local data like IMAGE", [](TestCase &t)
-        {
-            std::vector<uint8_t> vram(PS2_GS_VRAM_SIZE, 0u);
-            GS gs;
-            gs.init(vram.data(), static_cast<uint32_t>(vram.size()), nullptr);
-
-            // Setup for host->local transfer to DBP=0, DBW=1, PSMCT32, rect 2x2.
-            const uint64_t bitblt =
-                (static_cast<uint64_t>(0u) << 0) |      // SBP
-                (static_cast<uint64_t>(1u) << 16) |     // SBW
-                (static_cast<uint64_t>(0u) << 24) |     // SPSM
-                (static_cast<uint64_t>(0u) << 32) |     // DBP
-                (static_cast<uint64_t>(1u) << 48) |     // DBW
-                (static_cast<uint64_t>(0u) << 56);      // DPSM (CT32)
-            gs.writeRegister(GS_REG_BITBLTBUF, bitblt);
-            gs.writeRegister(GS_REG_TRXPOS, 0ull);
-            gs.writeRegister(GS_REG_TRXREG, (2ull << 0) | (2ull << 32));
-            gs.writeRegister(GS_REG_TRXDIR, 0ull);
-
-            std::vector<uint8_t> packet;
-            appendU64(packet, makeGifTag(1u, GIF_FMT_DISABLED, 0u, true));
-            appendU64(packet, 0ull);
-
-            const uint8_t payload[16] = {
-                0x10u, 0x11u, 0x12u, 0x13u,
-                0x20u, 0x21u, 0x22u, 0x23u,
-                0x30u, 0x31u, 0x32u, 0x33u,
-                0x40u, 0x41u, 0x42u, 0x43u,
-            };
-            packet.insert(packet.end(), payload, payload + sizeof(payload));
-
-            gs.processGIFPacket(packet.data(), static_cast<uint32_t>(packet.size()));
-
-            bool same = true;
-            for (uint32_t y = 0; y < 2u && same; ++y)
-            {
-                for (uint32_t x = 0; x < 2u; ++x)
-                {
-                    const uint32_t pixelIndex = y * 2u + x;
-                    const uint32_t off = referenceAddrPSMCT32(0u, 1u, x, y);
-                    for (uint32_t c = 0; c < 4u; ++c)
-                    {
-                        if (vram[off + c] != payload[pixelIndex * 4u + c])
-                        {
-                            same = false;
-                            break;
-                        }
-                    }
-                    if (!same)
-                        break;
-                }
-            }
-            t.IsTrue(same, "GIF FLG=3 transfer should write payload bytes into GS VRAM like IMAGE");
-        });
-
         tc.Run("GIF load-image packet uses native upload fast path", [](TestCase &t)
         {
             std::vector<uint8_t> vram(PS2_GS_VRAM_SIZE, 0u);
@@ -3860,6 +3805,72 @@ void register_ps2_gs_tests()
                      "CT24 DATE should not block depth");
         });
 
+        tc.Run("GS sprite and point keep the sub-pixel part of XYZ and XYOFFSET", [](TestCase &t)
+        {
+            std::vector<uint8_t> vram(PS2_GS_VRAM_SIZE, 0u);
+            GS gs;
+            gs.init(vram.data(), static_cast<uint32_t>(vram.size()), nullptr);
+
+            constexpr uint64_t kFrame =
+                (1ull << 16) |
+                (static_cast<uint64_t>(GS_PSM_CT32) << 24);
+            constexpr uint64_t kZbuf = (1ull << 32);
+            constexpr uint64_t kScissor =
+                (0ull << 0) |
+                (15ull << 16) |
+                (0ull << 32) |
+                (15ull << 48);
+            constexpr uint64_t kRgbaq = 0x80FFFFFFull | (0x3F800000ull << 32);
+            auto makeXyz = [](uint16_t x, uint16_t y) -> uint64_t
+            {
+                return static_cast<uint64_t>(x) |
+                       (static_cast<uint64_t>(y) << 16);
+            };
+            auto drawnPixels = [&]() -> std::vector<std::pair<uint32_t, uint32_t>>
+            {
+                std::vector<std::pair<uint32_t, uint32_t>> drawn;
+                for (uint32_t y = 0u; y <= 9u; ++y)
+                {
+                    for (uint32_t x = 0u; x <= 9u; ++x)
+                    {
+                        if ((readReferencePSMCT32Pixel(vram, 0u, 1u, x, y) & 0x00FFFFFFu) != 0u)
+                            drawn.emplace_back(x, y);
+                    }
+                }
+                return drawn;
+            };
+
+            gs.writeRegister(GS_REG_FRAME_1, kFrame);
+            gs.writeRegister(GS_REG_ZBUF_1, kZbuf);
+            gs.writeRegister(GS_REG_SCISSOR_1, kScissor);
+            gs.writeRegister(GS_REG_TEST_1, 0x30000ull);
+            gs.writeRegister(GS_REG_RGBAQ, kRgbaq);
+
+            // XYOFFSET = 0.5 px. The sprite spans window x 2.25..6.25 and
+            // y 2.25..4.25, so it covers [ceil(2.25), ceil(6.25)) = 3..6 and 3..4.
+            gs.writeRegister(GS_REG_XYOFFSET_1, 0x08ull | (0x08ull << 32));
+            gs.writeRegister(GS_REG_PRIM, static_cast<uint64_t>(GS_PRIM_SPRITE));
+            gs.writeRegister(GS_REG_XYZ2, makeXyz(0x2Cu, 0x2Cu));
+            gs.writeRegister(GS_REG_XYZ2, makeXyz(0x6Cu, 0x4Cu));
+
+            std::vector<std::pair<uint32_t, uint32_t>> expectedSprite;
+            for (uint32_t y = 3u; y <= 4u; ++y)
+                for (uint32_t x = 3u; x <= 6u; ++x)
+                    expectedSprite.emplace_back(x, y);
+            t.IsTrue(drawnPixels() == expectedSprite,
+                     "sprite should cover pixels 3..6 x 3..4 from its sub-pixel window rectangle");
+
+            // A point at window (2.75, 1.25) lights the nearest pixel, (3, 1).
+            std::fill(vram.begin(), vram.end(), 0u);
+            gs.writeRegister(GS_REG_XYOFFSET_1, 0ull);
+            gs.writeRegister(GS_REG_PRIM, static_cast<uint64_t>(GS_PRIM_POINT));
+            gs.writeRegister(GS_REG_XYZ2, makeXyz(0x2Cu, 0x14u));
+
+            const std::vector<std::pair<uint32_t, uint32_t>> expectedPoint = {{3u, 1u}};
+            t.IsTrue(drawnPixels() == expectedPoint,
+                     "point should light the pixel nearest to its sub-pixel window position");
+        });
+
         tc.Run("GS triangle fan subpixel quad fills rows without interior holes", [](TestCase &t)
         {
             std::vector<uint8_t> vram(PS2_GS_VRAM_SIZE, 0u);
@@ -3954,7 +3965,6 @@ void register_ps2_gs_tests()
             constexpr uint32_t kSrcAddr = 0x5000u;
             constexpr uint32_t kDstAddr = 0x6000u;
 
-            constexpr uint32_t kPacketAddr = 0x000C1000u;
             const GsImageMem image{0u, 0u, 2u, 2u, 0u, 1u, 0u};
             const uint8_t pixels[16] = {
                 0x10u, 0x20u, 0x30u, 0x40u,
@@ -3973,17 +3983,17 @@ void register_ps2_gs_tests()
             t.Equals(static_cast<int32_t>(getRegU32Test(loadCtx, 2)), 0,
                      "sceGsExecLoadImage should succeed for a simple CT32 upload");
             uint64_t loadTag = 0u;
-            std::memcpy(&loadTag, rdram + kPacketAddr, sizeof(loadTag));
+            std::memcpy(&loadTag, rdram + runtime.guestHeapBase(), sizeof(loadTag));
             t.Equals(loadTag, 0x1000000000008004ull,
                      "sceGsExecLoadImage should populate the packed A+D GIF tag in guest RAM");
             uint64_t loadReg1 = 0u;
             uint64_t loadReg2 = 0u;
             uint64_t loadReg3 = 0u;
             uint64_t loadReg4 = 0u;
-            std::memcpy(&loadReg1, rdram + kPacketAddr + 24u, sizeof(loadReg1));
-            std::memcpy(&loadReg2, rdram + kPacketAddr + 40u, sizeof(loadReg2));
-            std::memcpy(&loadReg3, rdram + kPacketAddr + 56u, sizeof(loadReg3));
-            std::memcpy(&loadReg4, rdram + kPacketAddr + 72u, sizeof(loadReg4));
+            std::memcpy(&loadReg1, rdram + runtime.guestHeapBase() + 24u, sizeof(loadReg1));
+            std::memcpy(&loadReg2, rdram + runtime.guestHeapBase() + 40u, sizeof(loadReg2));
+            std::memcpy(&loadReg3, rdram + runtime.guestHeapBase() + 56u, sizeof(loadReg3));
+            std::memcpy(&loadReg4, rdram + runtime.guestHeapBase() + 72u, sizeof(loadReg4));
             t.Equals(loadReg1, 0x50ull, "sceGsExecLoadImage should encode BITBLTBUF as A+D register 0x50");
             t.Equals(loadReg2, 0x51ull, "sceGsExecLoadImage should encode TRXPOS as A+D register 0x51");
             t.Equals(loadReg3, 0x52ull, "sceGsExecLoadImage should encode TRXREG as A+D register 0x52");
@@ -3998,17 +4008,17 @@ void register_ps2_gs_tests()
             t.Equals(static_cast<int32_t>(getRegU32Test(storeCtx, 2)), 0,
                      "sceGsExecStoreImage should succeed for a matching CT32 readback");
             uint64_t storeTag = 0u;
-            std::memcpy(&storeTag, rdram + kPacketAddr, sizeof(storeTag));
+            std::memcpy(&storeTag, rdram + runtime.guestHeapBase(), sizeof(storeTag));
             t.Equals(storeTag, 0x1000000000008004ull,
                      "sceGsExecStoreImage should populate the packed A+D GIF tag in guest RAM");
             uint64_t storeReg1 = 0u;
             uint64_t storeReg2 = 0u;
             uint64_t storeReg3 = 0u;
             uint64_t storeReg4 = 0u;
-            std::memcpy(&storeReg1, rdram + kPacketAddr + 24u, sizeof(storeReg1));
-            std::memcpy(&storeReg2, rdram + kPacketAddr + 40u, sizeof(storeReg2));
-            std::memcpy(&storeReg3, rdram + kPacketAddr + 56u, sizeof(storeReg3));
-            std::memcpy(&storeReg4, rdram + kPacketAddr + 72u, sizeof(storeReg4));
+            std::memcpy(&storeReg1, rdram + runtime.guestHeapBase() + 24u, sizeof(storeReg1));
+            std::memcpy(&storeReg2, rdram + runtime.guestHeapBase() + 40u, sizeof(storeReg2));
+            std::memcpy(&storeReg3, rdram + runtime.guestHeapBase() + 56u, sizeof(storeReg3));
+            std::memcpy(&storeReg4, rdram + runtime.guestHeapBase() + 72u, sizeof(storeReg4));
             t.Equals(storeReg1, 0x50ull, "sceGsExecStoreImage should encode BITBLTBUF as A+D register 0x50");
             t.Equals(storeReg2, 0x51ull, "sceGsExecStoreImage should encode TRXPOS as A+D register 0x51");
             t.Equals(storeReg3, 0x52ull, "sceGsExecStoreImage should encode TRXREG as A+D register 0x52");
