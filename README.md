@@ -203,6 +203,6 @@ Other fields (Wikidata item, target platforms, maintainers, links, what help is 
 
 ###  Notes
 
-> My idea is to make this fork (based on PS2Recomp by Ran-J) as compatible as possible with the games I work on.
-> It will serve as the foundation for the rest of my recompilation projects.
-> Once I've implemented the necessary fixes and everything is running reliably, I plan to develop a launcher and rendering wrappers to support Vulkan and DirectX (for Windows and Linux, where applicable), and possibly Metal (for macOS).
+* My idea is to make this fork (based on PS2Recomp by Ran-J) as compatible as possible with the games I work on.
+* It will serve as the foundation for the rest of my recompilation projects.
+* Once I've implemented the necessary fixes and everything is running reliably, I plan to develop a launcher and rendering wrappers to support Vulkan and DirectX (for Windows and Linux, where applicable), and possibly Metal (for macOS).
