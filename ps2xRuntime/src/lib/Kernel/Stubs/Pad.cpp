@@ -315,6 +315,12 @@ namespace ps2_stubs
                 }
             }
 
+            if (port == 0 && slot == 0 && portState.readCount >= 40u &&
+                portState.readCount < 55u && std::getenv("PS2RECOMP_PAD_DIAGNOSTIC_START"))
+                setButton(state, kPadBtnStart, true);
+            if (port == 0 && slot == 0 && portState.readCount >= 72u &&
+                portState.readCount < 84u && std::getenv("PS2RECOMP_PAD_DIAGNOSTIC_NEW_GAME"))
+                setButton(state, kPadBtnCross, true);
             fillPadStatus(outData, state, portState);
 
             {

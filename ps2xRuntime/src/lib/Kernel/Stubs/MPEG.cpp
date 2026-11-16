@@ -487,6 +487,7 @@ namespace ps2_stubs
         struct MpegPlaybackState
         {
             uint32_t picturesServed = 0u;
+            uint32_t createWorkSize = 0u;
             uint32_t width = 320u;
             uint32_t height = 240u;
             uint32_t decodeMode = 0u;
@@ -2000,7 +2001,17 @@ namespace ps2_stubs
 
         {
             std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
-            getPlaybackState(param_1) = makeFreshPlaybackState();
+            MpegPlaybackState &playback = getPlaybackState(param_1);
+            const char *preserveOption = std::getenv("PS2RECOMP_MPEG_PRESERVE_PROBE");
+            const bool preserveProbe = preserveOption && preserveOption[0] == '1' &&
+                                       playback.createWorkSize != 0u && playback.createWorkSize <= 16384u &&
+                                       static_cast<uint64_t>(param_3) >= static_cast<uint64_t>(playback.createWorkSize) * 4u &&
+                                       playback.picturesServed == 0u && playback.sawInput &&
+                                       !playback.streamEnded && !playback.decoderFailed &&
+                                       playback.cdStreamGeneration == g_mpeg_stub_state.cdStreamGeneration;
+            if (!preserveProbe)
+                playback = makeFreshPlaybackState();
+            playback.createWorkSize = param_3;
         }
 
         const uint32_t puVar4 = uVar3 + 0x108u;
@@ -2297,6 +2308,16 @@ namespace ps2_stubs
                 !playback.streamEnded &&
                 !playback.decoderFailed)
             {
+                const char *pollOption = std::getenv("PS2RECOMP_MPEG_EMPTY_POLL");
+                if (pollOption && pollOption[0] == '1' && playback.picturesServed != 0u &&
+                    playback.createWorkSize >= 65536u)
+                {
+                    if (g_mpeg_stub_state.getPictureWaitTraceCount++ < 32u)
+                        std::fprintf(stderr, "[MPEG:EmptyPoll] mpeg=%08x served=%u input=%d\n",
+                                     mpegAddr, playback.picturesServed, playback.sawInput ? 1 : 0);
+                    setReturnS32(ctx, -1);
+                    return;
+                }
                 if (g_mpeg_stub_state.getPictureWaitTraceCount < 32u)
                 {
                     PS2_IF_AGRESSIVE_LOGS({

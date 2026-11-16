@@ -919,7 +919,8 @@ void register_ps2_runtime_kernel_tests()
 
             env.runtime.guestFree(grown);
             const uint32_t reused = env.runtime.guestMalloc(0x80u, 16u);
-            t.Equals(reused, heapBase, "guestFree should make the head block reusable");
+            t.Equals(reused, 0x000C1000u, "guestFree should reuse the runtime-owned allocation range");
+            t.IsTrue(reused < heapBase, "runtime allocations must not overlap the game-managed heap");
         });
 
         tc.Run("memalign stubs allocate aligned guest memory", [](TestCase &t)
