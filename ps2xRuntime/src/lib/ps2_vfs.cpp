@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cerrno>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -142,6 +143,54 @@ namespace
             if (part == "..")
                 return false;
         }
+        return true;
+    }
+
+    // ISO9660 disc names are case-insensitive even on case-sensitive hosts.
+    // Keep exact matches first, then resolve each remaining component.
+    bool resolveCdromCaseInsensitive(const std::filesystem::path &path, std::filesystem::path &resolved)
+    {
+        std::error_code error;
+        if (std::filesystem::exists(path, error) && !error)
+        {
+            resolved = path;
+            return true;
+        }
+
+        std::filesystem::path current = path.is_absolute() ? path.root_path() : std::filesystem::path(".");
+        const auto remaining = path.is_absolute() ? path.relative_path() : path;
+        for (const auto &part : remaining)
+        {
+            const auto candidate = current / part;
+            error.clear();
+            if (std::filesystem::exists(candidate, error) && !error)
+            {
+                current = candidate;
+                continue;
+            }
+
+            error.clear();
+            std::filesystem::directory_iterator it(current, error);
+            if (error)
+                return false;
+            const std::string wanted = part.string();
+            bool matched = false;
+            for (const auto &entry : it)
+            {
+                const std::string name = entry.path().filename().string();
+                if (name.size() == wanted.size() &&
+                    std::equal(name.begin(), name.end(), wanted.begin(),
+                               [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); }))
+                {
+                    current = entry.path();
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched)
+                return false;
+        }
+        resolved = current;
         return true;
     }
 
@@ -298,6 +347,12 @@ bool PS2Vfs::resolveHostPath(std::string_view path, const PS2VfsMounts &mounts, 
     if (base.empty() || !safeRelativePath(parsed.path, relative))
         return false;
     result = (base / relative).lexically_normal();
+    if (parsed.device == ps2x::iop::Ps2PathDevice::Cdrom)
+    {
+        std::filesystem::path resolved;
+        if (resolveCdromCaseInsensitive(result, resolved))
+            result = std::move(resolved);
+    }
     return true;
 }
 

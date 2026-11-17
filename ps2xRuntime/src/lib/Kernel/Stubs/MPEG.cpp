@@ -2002,9 +2002,7 @@ namespace ps2_stubs
         {
             std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
             MpegPlaybackState &playback = getPlaybackState(param_1);
-            const char *preserveOption = std::getenv("PS2RECOMP_MPEG_PRESERVE_PROBE");
-            const bool preserveProbe = preserveOption && preserveOption[0] == '1' &&
-                                       playback.createWorkSize != 0u && playback.createWorkSize <= 16384u &&
+            const bool preserveProbe = playback.createWorkSize != 0u && playback.createWorkSize <= 16384u &&
                                        static_cast<uint64_t>(param_3) >= static_cast<uint64_t>(playback.createWorkSize) * 4u &&
                                        playback.picturesServed == 0u && playback.sawInput &&
                                        !playback.streamEnded && !playback.decoderFailed &&
@@ -2308,8 +2306,7 @@ namespace ps2_stubs
                 !playback.streamEnded &&
                 !playback.decoderFailed)
             {
-                const char *pollOption = std::getenv("PS2RECOMP_MPEG_EMPTY_POLL");
-                if (pollOption && pollOption[0] == '1' && playback.picturesServed != 0u &&
+                if (playback.picturesServed != 0u &&
                     playback.createWorkSize >= 65536u)
                 {
                     if (g_mpeg_stub_state.getPictureWaitTraceCount++ < 32u)

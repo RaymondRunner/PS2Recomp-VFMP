@@ -605,6 +605,21 @@ void register_ps2_runtime_kernel_tests()
             t.Equals(thread->option, threadParam.option, "option must be decoded from offset 0x20");
             t.IsTrue(thread->status == EeThreadStatus::Dormant, "a newly created EE thread must be dormant");
 
+            threadParam.initial_priority = 0;
+            std::memcpy(env.rdram.data() + K_PARAM_ADDR, &threadParam, sizeof(threadParam));
+            CreateThread(env.rdram.data(), &env.ctx, &env.runtime);
+            const int priorityZeroId = getRegS32(env.ctx, 2);
+            const GuestThread *priorityZeroThread = env.runtime.eeScheduler().thread(priorityZeroId);
+            t.IsTrue(priorityZeroId >= 2 && priorityZeroThread != nullptr,
+                     "CreateThread must accept EE priority zero");
+            if (priorityZeroThread)
+                t.Equals(priorityZeroThread->initialPriority, 0, "priority zero must be preserved");
+
+            threadParam.initial_priority = 128;
+            std::memcpy(env.rdram.data() + K_PARAM_ADDR, &threadParam, sizeof(threadParam));
+            CreateThread(env.rdram.data(), &env.ctx, &env.runtime);
+            t.Equals(getRegS32(env.ctx, 2), -403, "priority outside the EE queue range must remain invalid");
+
             setRegU32(env.ctx, 4, PS2_RAM_SIZE - static_cast<uint32_t>(sizeof(EeThreadCreateAbi)) + 4u);
             CreateThread(env.rdram.data(), &env.ctx, &env.runtime);
             t.Equals(getRegS32(env.ctx, 2), KE_ERROR,

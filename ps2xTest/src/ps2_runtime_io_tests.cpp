@@ -168,6 +168,34 @@ void register_ps2_runtime_io_tests()
 {
     MiniTest::Case("PS2RuntimeIO", [](TestCase &tc)
     {
+        tc.Run("CDROM resolves mixed-case package and movie paths", [](TestCase &t)
+        {
+            TestContext test;
+            std::filesystem::create_directories(test.paths.cdRoot / "VIDEO");
+            std::ofstream(test.paths.cdRoot / "ALLPAKS.PS2", std::ios::binary) << "pak";
+            std::ofstream(test.paths.cdRoot / "VIDEO" / "THQ.PSS", std::ios::binary) << "pss";
+
+            for (const char *path : {"cdrom0:\\allpaks.ps2;1", "cdrom0:\\video\\thq.pss;1"})
+            {
+                writeGuestString(test.rdram.data(), GUEST_STRING_AREA_START, path);
+                setRegU32(test.ctx, 4, GUEST_STRING_AREA_START);
+                setRegU32(test.ctx, 5, PS2_FIO_O_RDONLY);
+                fioOpen(test.rdram.data(), &test.ctx, &test.runtime);
+                const int32_t fd = getRegS32(&test.ctx, 2);
+                t.IsTrue(fd >= 3, "disc file must open despite mixed-case components");
+                if (fd >= 3)
+                {
+                    setRegU32(test.ctx, 4, static_cast<uint32_t>(fd));
+                    setRegU32(test.ctx, 5, GUEST_BUFFER_AREA_START);
+                    setRegU32(test.ctx, 6, 3u);
+                    fioRead(test.rdram.data(), &test.ctx, &test.runtime);
+                    t.Equals(getRegS32(&test.ctx, 2), 3, "disc file contents must be readable");
+                    setRegU32(test.ctx, 4, static_cast<uint32_t>(fd));
+                    fioClose(test.rdram.data(), &test.ctx, &test.runtime);
+                }
+            }
+        });
+
         tc.Run("ROM0 ROMVER is exposed as the 14-byte firmware pseudo-file", [](TestCase &t)
         {
             TestContext test;
